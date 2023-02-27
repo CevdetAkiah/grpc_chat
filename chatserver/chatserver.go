@@ -1,7 +1,6 @@
 package chatserver
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	sync "sync"
@@ -27,13 +26,30 @@ var messageHandleObject = messageHandle{}
 type ChatServer struct {
 }
 
-var streamlist []Services_ChatServiceServer
+// register each stream to a unique code for broadcasting purposes
+type clients struct {
+	streamlist map[int]Services_ChatServiceServer
+}
+
+// used to search the list of streams in client struct
+var clientCodeList []int
+
+var clientList clients
+
+// initialise map
+func init() {
+	clientList = clients{
+		streamlist: make(map[int]Services_ChatServiceServer),
+	}
+}
 
 // define ChatService
 func (is *ChatServer) ChatService(csi Services_ChatServiceServer) error {
-	streamlist = append(streamlist, csi)
 
 	clientUniqueCode := rand.Intn(1e6)
+	clientList.streamlist[clientUniqueCode] = csi
+	clientCodeList = append(clientCodeList, clientUniqueCode)
+
 	errch := make(chan error)
 
 	// asynchronously run receiveFromStream and sendToStream methods
@@ -73,7 +89,6 @@ func receiveFromStream(csi_ Services_ChatServiceServer, clientUniqueCode_ int, e
 
 // send message
 func sendToStream(csi_ Services_ChatServiceServer, clientUniqueCode_ int, errch_ chan error) {
-	// TODO: try cycling through each messageUnit and send to each client using length of MQue. Then delete message
 	for {
 		// loop through messages on MQue
 		for {
@@ -85,23 +100,28 @@ func sendToStream(csi_ Services_ChatServiceServer, clientUniqueCode_ int, errch_
 				break
 			}
 
-			// senderUniqueCode := messageHandleObject.MQue[0].ClientUniqueCode
+			senderUniqueCode := messageHandleObject.MQue[0].ClientUniqueCode
 			senderName4Client := messageHandleObject.MQue[0].ClientName
 			message4Client := messageHandleObject.MQue[0].MessageBody
 
 			messageHandleObject.mu.Unlock()
 
-			for i := len(streamlist) - 1; i >= 0; i-- {
-				fmt.Println(len(streamlist))
+			// send message to each registered client
+			for i := len(clientCodeList) - 1; i >= 0; i-- {
 				// send message to designated client (do not send to the same client)
-				// if senderUniqueCode != clientUniqueCode_ {
-				err := streamlist[i].Send(&FromServer{Name: senderName4Client, Body: message4Client})
+				if senderUniqueCode == clientCodeList[i] {
+					i--
+				}
+				if i < 0 {
+					break
+				}
+				clientCode := clientCodeList[i]
+				err := clientList.streamlist[clientCode].Send(&FromServer{Name: senderName4Client, Body: message4Client})
 
 				if err != nil {
 					errch_ <- err
 				}
 
-				// }
 			}
 			messageHandleObject.mu.Lock()
 			if len(messageHandleObject.MQue) > 1 {
