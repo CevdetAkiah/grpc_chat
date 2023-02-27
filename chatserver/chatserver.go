@@ -1,6 +1,7 @@
 package chatserver
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	sync "sync"
@@ -18,7 +19,6 @@ type messageUnit struct {
 // hold slices of messageUnit and client
 type messageHandle struct {
 	MQue []messageUnit
-	CQue []client
 	mu   sync.Mutex // handle asynchronous read write operations
 }
 
@@ -27,8 +27,12 @@ var messageHandleObject = messageHandle{}
 type ChatServer struct {
 }
 
+var streamlist []Services_ChatServiceServer
+
 // define ChatService
 func (is *ChatServer) ChatService(csi Services_ChatServiceServer) error {
+	streamlist = append(streamlist, csi)
+
 	clientUniqueCode := rand.Intn(1e6)
 	errch := make(chan error)
 
@@ -60,8 +64,6 @@ func receiveFromStream(csi_ Services_ChatServiceServer, clientUniqueCode_ int, e
 				ClientUniqueCode:  clientUniqueCode_,
 			})
 
-			if messageHandleObject.CQue[]
-
 			messageHandleObject.mu.Unlock()
 
 			log.Printf("%v", messageHandleObject.MQue[len(messageHandleObject.MQue)-1])
@@ -83,29 +85,31 @@ func sendToStream(csi_ Services_ChatServiceServer, clientUniqueCode_ int, errch_
 				break
 			}
 
-			senderUniqueCode := messageHandleObject.MQue[0].ClientUniqueCode
+			// senderUniqueCode := messageHandleObject.MQue[0].ClientUniqueCode
 			senderName4Client := messageHandleObject.MQue[0].ClientName
 			message4Client := messageHandleObject.MQue[0].MessageBody
 
 			messageHandleObject.mu.Unlock()
 
-			// send message to designated client (do not send to the same client)
-			if senderUniqueCode != clientUniqueCode_ {
-				err := csi_.Send(&FromServer{Name: senderName4Client, Body: message4Client})
+			for i := len(streamlist) - 1; i >= 0; i-- {
+				fmt.Println(len(streamlist))
+				// send message to designated client (do not send to the same client)
+				// if senderUniqueCode != clientUniqueCode_ {
+				err := streamlist[i].Send(&FromServer{Name: senderName4Client, Body: message4Client})
 
 				if err != nil {
 					errch_ <- err
 				}
 
-				messageHandleObject.mu.Lock()
-
-				if len(messageHandleObject.MQue) > 1 {
-					messageHandleObject.MQue = messageHandleObject.MQue[1:] // delete the message
-				} else {
-					messageHandleObject.MQue = []messageUnit{}
-				}
-				messageHandleObject.mu.Unlock()
+				// }
 			}
+			messageHandleObject.mu.Lock()
+			if len(messageHandleObject.MQue) > 1 {
+				messageHandleObject.MQue = messageHandleObject.MQue[1:] // delete the message
+			} else {
+				messageHandleObject.MQue = []messageUnit{}
+			}
+			messageHandleObject.mu.Unlock()
 		}
 
 		time.Sleep(100 * time.Millisecond)
